@@ -2,7 +2,7 @@ use std::{fs::read_to_string, path::PathBuf};
 
 use async_trait::async_trait;
 use common::utils::hex_str_to_bytes;
-use ethers::types::{
+use ethers_core::types::{
     transaction::eip2930::AccessList, Address, EIP1186ProofResponse, FeeHistory, Filter, Log,
     Transaction, TransactionReceipt, H256,
 };

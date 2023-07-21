@@ -525,7 +525,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let val: String = serde::Deserialize::deserialize(deserializer)?;
-    let x = ethers::types::U256::from_dec_str(&val).map_err(D::Error::custom)?;
+    let x = ethers_core::types::U256::from_dec_str(&val).map_err(D::Error::custom)?;
     let mut x_bytes = [0; 32];
     x.to_little_endian(&mut x_bytes);
     Ok(U256::from_bytes_le(x_bytes))

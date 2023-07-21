@@ -1,9 +1,6 @@
 use std::{collections::HashMap, fmt};
 
-use ethers::{
-    prelude::{Address, H256, U256},
-    types::Transaction,
-};
+use ethers_core::types::{Address, Transaction, H256, U256};
 use eyre::Result;
 use serde::{ser::SerializeSeq, Deserialize, Serialize};
 

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use ethers::types::{
+use ethers_core::types::{
     transaction::eip2930::AccessList, Address, EIP1186ProofResponse, FeeHistory, Filter, Log,
     Transaction, TransactionReceipt, H256,
 };

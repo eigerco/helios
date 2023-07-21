@@ -9,7 +9,7 @@ use common::{
     errors::{BlockNotFoundError, SlotNotFoundError},
     types::BlockTag,
 };
-use ethers::{
+use ethers_core::{
     abi::ethereum_types::BigEndianHash,
     types::transaction::eip2930::AccessListItem,
     types::{Address, H160, H256, U256},
