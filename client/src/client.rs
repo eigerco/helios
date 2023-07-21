@@ -23,9 +23,9 @@ use tokio::spawn;
 use tokio::time::sleep;
 
 #[cfg(target_arch = "wasm32")]
-use gloo_timers::callback::Interval;
+use ic_cdk::spawn;
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local;
+use ic_cdk_timers::set_timer_interval;
 
 use crate::database::Database;
 use crate::errors::NodeError;
@@ -330,17 +330,19 @@ impl<DB: Database> Client<DB> {
 
     #[cfg(target_arch = "wasm32")]
     fn start_advance_thread(&self) {
+        use std::time::Duration;
+
         let node = self.node.clone();
-        Interval::new(12000, move || {
+
+        set_timer_interval(Duration::from_secs(12), move || {
             let node = node.clone();
-            spawn_local(async move {
+            spawn(async move {
                 let res = node.write().await.advance().await;
                 if let Err(err) = res {
                     warn!("consensus error: {}", err);
                 }
             });
-        })
-        .forget();
+        });
     }
 
     async fn boot_from_fallback(&self) -> eyre::Result<()> {
