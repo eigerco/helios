@@ -45,17 +45,13 @@ impl<E: ToString> RpcError<E> {
 }
 
 #[derive(Debug, Error)]
-#[error("canister call error: rejection code: {rejection_code:?}, message: {msg}")]
-pub struct CanisterCallError {
-    rejection_code: RejectionCode,
-    msg: String,
+pub enum HttpError {
+    #[error("canister call error: rejection code: {0:?}, message: {1}")]
+    CanisterCall(RejectionCode, String),
 }
 
-impl From<(RejectionCode, String)> for CanisterCallError {
+impl From<(RejectionCode, String)> for HttpError {
     fn from(value: (RejectionCode, String)) -> Self {
-        CanisterCallError {
-            rejection_code: value.0,
-            msg: value.1,
-        }
+        HttpError::CanisterCall(value.0, value.1)
     }
 }

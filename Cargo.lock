@@ -726,7 +726,6 @@ dependencies = [
  "log",
  "milagro_bls",
  "openssl",
- "reqwest",
  "serde",
  "serde_json",
  "ssz-rs",
