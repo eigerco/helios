@@ -1,4 +1,4 @@
-use ethers::{
+use ethers_core::{
     abi::AbiEncode,
     types::{Address, Filter, Log, SyncingStatus, Transaction, TransactionReceipt, H256, U256},
 };

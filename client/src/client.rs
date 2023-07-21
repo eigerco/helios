@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use config::networks::Network;
 use consensus::errors::ConsensusError;
-use ethers::prelude::{Address, U256};
-use ethers::types::{
-    FeeHistory, Filter, Log, SyncingStatus, Transaction, TransactionReceipt, H256,
+use ethers_core::types::{
+    Address, FeeHistory, Filter, Log, SyncingStatus, Transaction, TransactionReceipt, H256, U256,
 };
 use eyre::{eyre, Result};
 
