@@ -20,7 +20,6 @@ use log::trace;
 use revm::{AccountInfo, Bytecode, Database, Env, TransactOut, TransactTo, EVM};
 
 use consensus::types::ExecutionPayload;
-use tokio::task::spawn_blocking;
 
 use crate::{
     constants::PARALLEL_QUERY_BATCH_SIZE,
@@ -221,15 +220,24 @@ impl<'a, R: ExecutionRpc> ProofDB<'a, R> {
     }
 
     fn get_account(&mut self, address: Address, slots: &[H256]) -> Result<Account> {
+        /*
         let execution = self.execution.clone();
         let payload = self.current_payload.clone();
         let slots = slots.to_owned();
 
-        let handle = spawn_blocking(move || {
+        let handle = tokio::task::spawn_blocking(move || {
             block_on(execution.get_account(&address, Some(&slots), &payload))
         });
 
         block_on(handle)?
+        */
+
+        // TODO: The above is the original implementation, but it can not be used
+        // in WASM environments.
+        //
+        // We are also not sure if this will ever be triggered since batch_fetch_accounts
+        // is pre-fetching the accounts.
+        panic!("not supported in wasm");
     }
 }
 

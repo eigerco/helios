@@ -248,6 +248,8 @@ impl<DB: Database> Client<DB> {
         let config = Arc::new(config);
         let node = Node::new(config.clone())?;
         let node = Arc::new(RwLock::new(node));
+
+        #[cfg(not(target_arch = "wasm32"))]
         let mut rpc: Option<Rpc> = None;
 
         #[cfg(not(target_arch = "wasm32"))]
