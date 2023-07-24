@@ -677,6 +677,7 @@ dependencies = [
  "ic-cdk",
  "ic-http",
  "serde",
+ "serde_json",
  "ssz-rs",
  "thiserror",
 ]
@@ -1626,6 +1627,8 @@ dependencies = [
  "eyre",
  "futures",
  "hex",
+ "ic-cdk",
+ "ic-http",
  "log",
  "openssl",
  "revm",
