@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use ethers::types::{Address, Filter, H256, U256};
+use ethers_core::types::{Address, Filter, H256, U256};
 use ssz_rs::{List, Vector};
 
 use common::utils::hex_str_to_bytes;

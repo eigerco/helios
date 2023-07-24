@@ -8,7 +8,7 @@ eyre = "0.6.8"
 serde = { version = "1.0.143", features = ["derive"] }
 hex = "0.4.3"
 ssz-rs = { git = "https://github.com/ralexstokes/ssz-rs", rev = "d09f55b4f8554491e3431e01af1c32347a8781cd" }
-ethers = "2.0.2"
+ethers-core = { version = "2.0.8", default-features = false }
 futures = "0.3.23"
 log = "0.4.17"
 thiserror = "1.0.37"
@@ -23,7 +23,6 @@ jsonrpsee = { version = "0.15.1", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = "0.2.6"
-wasm-bindgen-futures = "0.4.33"
+ic-cdk-timers = "0.4.0"
+ic-cdk = "0.10.0"
 tokio = { version = "1", features = ["sync"] }
-

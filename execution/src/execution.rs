@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 
-use ethers::abi::AbiEncode;
-use ethers::prelude::{Address, U256};
-use ethers::types::{FeeHistory, Filter, Log, Transaction, TransactionReceipt, H256};
-use ethers::utils::keccak256;
-use ethers::utils::rlp::{encode, Encodable, RlpStream};
+use ethers_core::abi::AbiEncode;
+use ethers_core::types::{
+    Address, FeeHistory, Filter, Log, Transaction, TransactionReceipt, H256, U256,
+};
+use ethers_core::utils::keccak256;
+use ethers_core::utils::rlp::{encode, Encodable, RlpStream};
 use eyre::Result;
 
 use common::utils::hex_str_to_bytes;
@@ -395,9 +396,8 @@ impl<R: ExecutionRpc> ExecutionClient<R> {
             let execution_payload = payloads
                 .get(&block_id)
                 .ok_or(ExecutionError::EmptyExecutionPayload())?;
-            let converted_base_fee_per_gas = ethers::types::U256::from_little_endian(
-                &execution_payload.base_fee_per_gas().to_bytes_le(),
-            );
+            let converted_base_fee_per_gas =
+                U256::from_little_endian(&execution_payload.base_fee_per_gas().to_bytes_le());
             fee_history
                 .base_fee_per_gas
                 .push(converted_base_fee_per_gas);

@@ -1,4 +1,4 @@
-use ethers::prelude::Address;
+use ethers_core::types::Address;
 use eyre::Result;
 use ssz_rs::{Node, Vector};
 

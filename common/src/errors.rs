@@ -1,4 +1,5 @@
-use ethers::types::H256;
+use ethers_core::types::H256;
+use ic_cdk::api::call::RejectionCode;
 use thiserror::Error;
 
 use crate::types::BlockTag;
@@ -40,5 +41,17 @@ impl<E: ToString> RpcError<E> {
             method: method.to_string(),
             error: err,
         }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum HttpError {
+    #[error("canister call error: rejection code: {0:?}, message: {1}")]
+    CanisterCall(RejectionCode, String),
+}
+
+impl From<(RejectionCode, String)> for HttpError {
+    fn from(value: (RejectionCode, String)) -> Self {
+        HttpError::CanisterCall(value.0, value.1)
     }
 }

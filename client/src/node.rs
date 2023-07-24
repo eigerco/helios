@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ethers::prelude::{Address, U256};
-use ethers::types::{
-    FeeHistory, Filter, Log, SyncProgress, SyncingStatus, Transaction, TransactionReceipt, H256,
+use ethers_core::types::{
+    Address, FeeHistory, Filter, Log, SyncProgress, SyncingStatus, Transaction, TransactionReceipt,
+    H256, U256,
 };
 use eyre::{eyre, Result};
 

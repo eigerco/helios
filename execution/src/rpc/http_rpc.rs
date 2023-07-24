@@ -1,13 +1,11 @@
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use ethers::prelude::{Address, Http};
-use ethers::providers::{HttpRateLimitRetryPolicy, Middleware, Provider, RetryClient};
-use ethers::types::transaction::eip2718::TypedTransaction;
-use ethers::types::transaction::eip2930::AccessList;
-use ethers::types::{
-    BlockId, BlockNumber, Bytes, EIP1186ProofResponse, Eip1559TransactionRequest, FeeHistory,
-    Filter, Log, Transaction, TransactionReceipt, H256, U256,
+use ethers_core::types::transaction::eip2718::TypedTransaction;
+use ethers_core::types::transaction::eip2930::AccessList;
+use ethers_core::types::{
+    Address, BlockId, BlockNumber, Bytes, EIP1186ProofResponse, Eip1559TransactionRequest,
+    FeeHistory, Filter, Log, Transaction, TransactionReceipt, H256, U256,
 };
 use eyre::Result;
 
@@ -18,7 +16,7 @@ use super::ExecutionRpc;
 
 pub struct HttpRpc {
     url: String,
-    provider: Provider<RetryClient<Http>>,
+    //provider: Provider<RetryClient<Http>>,
 }
 
 impl Clone for HttpRpc {
@@ -31,6 +29,7 @@ impl Clone for HttpRpc {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ExecutionRpc for HttpRpc {
     fn new(rpc: &str) -> Result<Self> {
+        /*
         let http = Http::from_str(rpc)?;
         let mut client = RetryClient::new(http, Box::new(HttpRateLimitRetryPolicy), 100, 50);
         client.set_compute_units(300);
@@ -41,6 +40,8 @@ impl ExecutionRpc for HttpRpc {
             url: rpc.to_string(),
             provider,
         })
+        */
+        todo!()
     }
 
     async fn get_proof(
@@ -49,6 +50,7 @@ impl ExecutionRpc for HttpRpc {
         slots: &[H256],
         block: u64,
     ) -> Result<EIP1186ProofResponse> {
+        /*
         let block = Some(BlockId::from(block));
         let proof_response = self
             .provider
@@ -57,9 +59,12 @@ impl ExecutionRpc for HttpRpc {
             .map_err(|e| RpcError::new("get_proof", e))?;
 
         Ok(proof_response)
+        */
+        todo!()
     }
 
     async fn create_access_list(&self, opts: &CallOpts, block: u64) -> Result<AccessList> {
+        /*
         let block = Some(BlockId::from(block));
 
         let mut raw_tx = Eip1559TransactionRequest::new();
@@ -82,9 +87,12 @@ impl ExecutionRpc for HttpRpc {
             .map_err(|e| RpcError::new("create_access_list", e))?;
 
         Ok(list.access_list)
+        */
+        todo!()
     }
 
     async fn get_code(&self, address: &Address, block: u64) -> Result<Vec<u8>> {
+        /*
         let block = Some(BlockId::from(block));
         let code = self
             .provider
@@ -93,9 +101,12 @@ impl ExecutionRpc for HttpRpc {
             .map_err(|e| RpcError::new("get_code", e))?;
 
         Ok(code.to_vec())
+        */
+        todo!()
     }
 
     async fn send_raw_transaction(&self, bytes: &[u8]) -> Result<H256> {
+        /*
         let bytes = Bytes::from(bytes.to_owned());
         let tx = self
             .provider
@@ -104,9 +115,12 @@ impl ExecutionRpc for HttpRpc {
             .map_err(|e| RpcError::new("send_raw_transaction", e))?;
 
         Ok(tx.tx_hash())
+        */
+        todo!()
     }
 
     async fn get_transaction_receipt(&self, tx_hash: &H256) -> Result<Option<TransactionReceipt>> {
+        /*
         let receipt = self
             .provider
             .get_transaction_receipt(*tx_hash)
@@ -114,31 +128,42 @@ impl ExecutionRpc for HttpRpc {
             .map_err(|e| RpcError::new("get_transaction_receipt", e))?;
 
         Ok(receipt)
+        */
+        todo!()
     }
 
     async fn get_transaction(&self, tx_hash: &H256) -> Result<Option<Transaction>> {
+        /*
         Ok(self
             .provider
             .get_transaction(*tx_hash)
             .await
             .map_err(|e| RpcError::new("get_transaction", e))?)
+        */
+        todo!()
     }
 
     async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>> {
+        /*
         Ok(self
             .provider
             .get_logs(filter)
             .await
             .map_err(|e| RpcError::new("get_logs", e))?)
+        */
+        todo!()
     }
 
     async fn chain_id(&self) -> Result<u64> {
+        /*
         Ok(self
             .provider
             .get_chainid()
             .await
             .map_err(|e| RpcError::new("chain_id", e))?
             .as_u64())
+        */
+        todo!()
     }
 
     async fn get_fee_history(
@@ -147,11 +172,14 @@ impl ExecutionRpc for HttpRpc {
         last_block: u64,
         reward_percentiles: &[f64],
     ) -> Result<FeeHistory> {
+        /*
         let block = BlockNumber::from(last_block);
         Ok(self
             .provider
             .fee_history(block_count, block, reward_percentiles)
             .await
             .map_err(|e| RpcError::new("fee_history", e))?)
+        */
+        todo!()
     }
 }

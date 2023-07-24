@@ -1,7 +1,6 @@
 #![allow(deprecated)]
 
 use env_logger::Env;
-use ethers::prelude::*;
 use std::{path::PathBuf, sync::Arc};
 
 use helios::{
