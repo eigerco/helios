@@ -176,11 +176,11 @@ impl ExecutionRpc for HttpRpc {
 /// A JSON-RPC response
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
-enum Response {
+enum Response<'a> {
     Success {
         #[serde(rename = "id")]
         _id: u64,
-        result: String,
+        result: &'a str,
     },
     Error {
         #[serde(rename = "id")]
@@ -225,7 +225,7 @@ impl HttpRpc {
         }
 
         match serde_json::from_slice(&response.0.body)? {
-            Response::Success { result, .. } => Ok(serde_json::from_str(&result)?),
+            Response::Success { result, .. } => Ok(serde_json::from_str(result)?),
             Response::Error { error, .. } => Err(error)?,
         }
     }
