@@ -52,6 +52,9 @@ pub enum HttpError {
 
     #[error("http error: status: {0}, body: {1}")]
     Http(u16, String),
+
+    #[error("an error occured: {0}")]
+    Other(String),
 }
 
 impl From<(RejectionCode, String)> for HttpError {

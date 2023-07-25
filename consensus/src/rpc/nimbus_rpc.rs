@@ -6,7 +6,7 @@ use super::ConsensusRpc;
 use crate::constants::MAX_REQUEST_LIGHT_CLIENT_UPDATES;
 use crate::types::*;
 use common::errors::RpcError;
-use common::http::http_get;
+use common::http;
 
 #[derive(Debug)]
 pub struct NimbusRpc {
@@ -120,7 +120,7 @@ where
 {
     let name = name.as_ref();
     let url = url.as_ref();
-    let resp = http_get(url).await.map_err(|e| RpcError::new(name, e))?;
+    let resp = http::get(url).await.map_err(|e| RpcError::new(name, e))?;
 
     if resp.status != 200 {
         let e = format!("http response with status {}", resp.status);

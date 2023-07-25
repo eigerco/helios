@@ -8,12 +8,12 @@ use ethers_core::types::{
     FeeHistory, Filter, Log, Transaction, TransactionReceipt, H256, U256,
 };
 use eyre::Result;
-use ic_cdk::api::management_canister::http_request::{HttpHeader, HttpMethod};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::types::CallOpts;
 use common::errors::{HttpError, JsonRpcError, RpcError};
+use common::http;
 
 use super::ExecutionRpc;
 
@@ -204,27 +204,19 @@ impl HttpRpc {
             "params": params,
         });
 
-        let request = ic_http::create_request()
-            .url(self.url.as_ref())
-            .method(HttpMethod::POST)
-            .header(HttpHeader {
-                name: "Content-Type".to_owned(),
-                value: "application/json".to_owned(),
-            })
-            .body(serde_json::to_vec(&payload)?)
-            .build();
+        let response = http::post(
+            &self.url,
+            &[("Content-Type", "application/json")],
+            serde_json::to_vec(&payload)?,
+        )
+        .await?;
 
-        let response = ic_http::http_request(request, 100_000_000)
-            .await
-            .map_err(HttpError::from)?;
-
-        if response.0.status != 200 {
-            let status: u16 = response.0.status.0.try_into()?;
-            let body = std::str::from_utf8(&response.0.body).unwrap_or("couldn't decode error");
-            Err(HttpError::Http(status, body.to_owned()))?;
+        if response.status != 200 {
+            let body = std::str::from_utf8(&response.body).unwrap_or("couldn't decode error");
+            Err(HttpError::Http(response.status, body.to_owned()))?;
         }
 
-        match serde_json::from_slice(&response.0.body)? {
+        match serde_json::from_slice(&response.body)? {
             Response::Success { result, .. } => Ok(serde_json::from_str(result)?),
             Response::Error { error, .. } => Err(error)?,
         }
