@@ -1627,7 +1627,6 @@ dependencies = [
  "eyre",
  "futures",
  "hex",
- "ic-cdk",
  "log",
  "openssl",
  "revm",
