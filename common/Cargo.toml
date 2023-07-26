@@ -11,7 +11,8 @@ hex = "0.4.3"
 ssz-rs = { git = "https://github.com/ralexstokes/ssz-rs", rev = "d09f55b4f8554491e3431e01af1c32347a8781cd" }
 ethers-core = "2.0.8"
 thiserror = "1.0.37"
-candid = "0.9.1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 ic-cdk = "0.10.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

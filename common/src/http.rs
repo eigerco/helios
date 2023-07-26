@@ -25,7 +25,7 @@ mod icp {
     use ic_cdk::api::{
         call::CallResult,
         management_canister::http_request::{
-            CanisterHttpRequestArgument, HttpHeader, HttpMethod,
+            http_request, CanisterHttpRequestArgument, HttpHeader, HttpMethod,
             HttpResponse as CanisterHttpResponse,
         },
     };
@@ -40,7 +40,7 @@ mod icp {
             method: HttpMethod::GET,
             ..Default::default()
         };
-        let resp = ic_http_outcall(req, DEFAULT_HTTP_OUTCALL_COST).await?;
+        let resp = http_request(req, DEFAULT_HTTP_OUTCALL_COST).await?;
         resp.0.try_into()
     }
 
@@ -63,21 +63,8 @@ mod icp {
             body: Some(body),
             ..Default::default()
         };
-        let resp = ic_http_outcall(req, DEFAULT_HTTP_OUTCALL_COST).await?;
+        let resp = http_request(req, DEFAULT_HTTP_OUTCALL_COST).await?;
         resp.0.try_into()
-    }
-
-    async fn ic_http_outcall(
-        arg: CanisterHttpRequestArgument,
-        cycles: u128,
-    ) -> CallResult<(CanisterHttpResponse,)> {
-        ic_cdk::api::call::call_with_payment128(
-            candid::Principal::management_canister(),
-            "http_request",
-            (arg,),
-            cycles,
-        )
-        .await
     }
 
     impl TryFrom<CanisterHttpResponse> for HttpResponse {

@@ -1,5 +1,4 @@
 use ethers_core::types::H256;
-use ic_cdk::api::call::RejectionCode;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -47,16 +46,18 @@ impl<E: ToString> RpcError<E> {
 
 #[derive(Debug, Error)]
 pub enum HttpError {
-    #[error("canister call error: rejection code: {0:?}, message: {1}")]
-    CanisterCall(RejectionCode, String),
-
     #[error("http error: status: {0}, body: {1}")]
     Http(u16, String),
 
     #[error("an error occured: {0}")]
     Other(String),
+
+    #[cfg(target_arch = "wasm32")]
+    #[error("canister call error: rejection code: {0:?}, message: {1}")]
+    CanisterCall(ic_cdk::api::call::RejectionCode, String),
 }
 
+#[cfg(target_arch = "wasm32")]
 impl From<(RejectionCode, String)> for HttpError {
     fn from(value: (RejectionCode, String)) -> Self {
         HttpError::CanisterCall(value.0, value.1)
