@@ -11,18 +11,15 @@ pub use native::{get, post};
 
 #[cfg(target_arch = "wasm32")]
 mod icp {
-    use ic_cdk::api::{
-        call::CallResult,
-        management_canister::http_request::{
-            http_request, CanisterHttpRequestArgument, HttpHeader, HttpMethod,
-            HttpResponse as CanisterHttpResponse,
-        },
+    use ic_cdk::api::management_canister::http_request::{
+        http_request, CanisterHttpRequestArgument, HttpHeader, HttpMethod,
+        HttpResponse as CanisterHttpResponse,
     };
 
     use crate::errors::HttpError;
     use crate::icp::DEFAULT_HTTP_OUTCALL_COST;
 
-    use super::{HttpResponse, DEFAULT_HTTP_OUTCALL_COST};
+    use super::HttpResponse;
 
     pub async fn get(url: &str) -> Result<HttpResponse, HttpError> {
         let req = CanisterHttpRequestArgument {

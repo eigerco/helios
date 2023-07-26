@@ -58,8 +58,8 @@ pub enum HttpError {
 }
 
 #[cfg(target_arch = "wasm32")]
-impl From<(RejectionCode, String)> for HttpError {
-    fn from(value: (RejectionCode, String)) -> Self {
+impl From<(ic_cdk::api::call::RejectionCode, String)> for HttpError {
+    fn from(value: (ic_cdk::api::call::RejectionCode, String)) -> Self {
         HttpError::CanisterCall(value.0, value.1)
     }
 }
