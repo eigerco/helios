@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use common::http::http_get;
+use common::http;
 use ethers_core::types::H256;
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +88,7 @@ impl CheckpointFallback {
     /// The list is defined in [ethPandaOps/checkpoint-fallback-service](https://github.com/ethpandaops/checkpoint-sync-health-checks/blob/master/_data/endpoints.yaml).
     pub async fn build(mut self) -> eyre::Result<Self> {
         // Fetch the services
-        let resp = http_get(CHECKPOINT_SYNC_SERVICES_LIST).await?;
+        let resp = http::get(CHECKPOINT_SYNC_SERVICES_LIST).await?;
         let yaml = String::from_utf8(resp.body)?;
 
         // Parse the yaml content results.
@@ -123,7 +123,7 @@ impl CheckpointFallback {
 
     async fn query_service(endpoint: &str) -> Option<RawSlotResponse> {
         let constructed_url = Self::construct_url(endpoint);
-        let resp = http_get(&constructed_url).await.ok()?;
+        let resp = http::get(&constructed_url).await.ok()?;
         let raw: RawSlotResponse = serde_json::from_slice(&resp.body).ok()?;
         Some(raw)
     }
@@ -199,7 +199,7 @@ impl CheckpointFallback {
     pub async fn fetch_checkpoint_from_api(url: &str) -> eyre::Result<H256> {
         // Fetch the url
         let constructed_url = Self::construct_url(url);
-        let resp = http_get(&constructed_url).await?;
+        let resp = http::get(&constructed_url).await?;
         let raw: RawSlotResponse = serde_json::from_slice(&resp.body)?;
         let slot = raw.data.slots[0].clone();
         slot.block_root

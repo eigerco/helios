@@ -1,22 +1,25 @@
-use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use ethers_core::types::transaction::eip2718::TypedTransaction;
-use ethers_core::types::transaction::eip2930::AccessList;
+use ethers_core::types::transaction::eip2930::{AccessList, AccessListWithGasUsed};
 use ethers_core::types::{
     Address, BlockId, BlockNumber, Bytes, EIP1186ProofResponse, Eip1559TransactionRequest,
     FeeHistory, Filter, Log, Transaction, TransactionReceipt, H256, U256,
 };
 use eyre::Result;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::types::CallOpts;
-use common::errors::RpcError;
+use common::errors::{HttpError, JsonRpcError, RpcError};
+use common::http;
 
 use super::ExecutionRpc;
 
 pub struct HttpRpc {
+    id: AtomicU64,
     url: String,
-    //provider: Provider<RetryClient<Http>>,
 }
 
 impl Clone for HttpRpc {
@@ -29,19 +32,10 @@ impl Clone for HttpRpc {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ExecutionRpc for HttpRpc {
     fn new(rpc: &str) -> Result<Self> {
-        /*
-        let http = Http::from_str(rpc)?;
-        let mut client = RetryClient::new(http, Box::new(HttpRateLimitRetryPolicy), 100, 50);
-        client.set_compute_units(300);
-
-        let provider = Provider::new(client);
-
-        Ok(HttpRpc {
-            url: rpc.to_string(),
-            provider,
+        Ok(Self {
+            id: AtomicU64::new(0),
+            url: rpc.to_owned(),
         })
-        */
-        todo!()
     }
 
     async fn get_proof(
@@ -50,23 +44,20 @@ impl ExecutionRpc for HttpRpc {
         slots: &[H256],
         block: u64,
     ) -> Result<EIP1186ProofResponse> {
-        /*
-        let block = Some(BlockId::from(block));
-        let proof_response = self
-            .provider
-            .get_proof(*address, slots.to_vec(), block)
-            .await
-            .map_err(|e| RpcError::new("get_proof", e))?;
+        let address = serde_json::to_value(address)?;
+        let slots = slots
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()?;
+        let block = serde_json::to_value(BlockId::from(block))?;
 
-        Ok(proof_response)
-        */
-        todo!()
+        Ok(self
+            .request("eth_getProof", [address, slots, block])
+            .await
+            .map_err(|e| RpcError::new("get_proof", e))?)
     }
 
     async fn create_access_list(&self, opts: &CallOpts, block: u64) -> Result<AccessList> {
-        /*
-        let block = Some(BlockId::from(block));
-
         let mut raw_tx = Eip1559TransactionRequest::new();
         raw_tx.to = Some(opts.to.unwrap_or_default().into());
         raw_tx.from = opts.from;
@@ -79,91 +70,63 @@ impl ExecutionRpc for HttpRpc {
             .as_ref()
             .map(|data| Bytes::from(data.as_slice().to_owned()));
 
-        let tx = TypedTransaction::Eip1559(raw_tx);
-        let list = self
-            .provider
-            .create_access_list(&tx, block)
-            .await
-            .map_err(|e| RpcError::new("create_access_list", e))?;
+        let block = serde_json::to_value(BlockId::from(block))?;
+        let tx = serde_json::to_value(TypedTransaction::Eip1559(raw_tx))?;
 
-        Ok(list.access_list)
-        */
-        todo!()
+        Ok(self
+            .request::<_, AccessListWithGasUsed>("eth_createAccessList", [tx, block])
+            .await
+            .map_err(|e| RpcError::new("create_access_list", e))?
+            .access_list)
     }
 
     async fn get_code(&self, address: &Address, block: u64) -> Result<Vec<u8>> {
-        /*
-        let block = Some(BlockId::from(block));
-        let code = self
-            .provider
-            .get_code(*address, block)
-            .await
-            .map_err(|e| RpcError::new("get_code", e))?;
+        let address = serde_json::to_value(address)?;
+        let block = serde_json::to_value(BlockId::from(block))?;
 
-        Ok(code.to_vec())
-        */
-        todo!()
+        Ok(self
+            .request::<_, Bytes>("eth_getCode", [address, block])
+            .await
+            .map_err(|e| RpcError::new("get_code", e))?
+            .to_vec())
     }
 
     async fn send_raw_transaction(&self, bytes: &[u8]) -> Result<H256> {
-        /*
         let bytes = Bytes::from(bytes.to_owned());
-        let tx = self
-            .provider
-            .send_raw_transaction(bytes)
-            .await
-            .map_err(|e| RpcError::new("send_raw_transaction", e))?;
 
-        Ok(tx.tx_hash())
-        */
-        todo!()
+        Ok(self
+            .request("eth_sendRawTransaction", [bytes])
+            .await
+            .map_err(|e| RpcError::new("send_raw_transaction", e))?)
     }
 
     async fn get_transaction_receipt(&self, tx_hash: &H256) -> Result<Option<TransactionReceipt>> {
-        /*
-        let receipt = self
-            .provider
-            .get_transaction_receipt(*tx_hash)
+        Ok(self
+            .request("eth_getTransactionReceipt", [tx_hash])
             .await
-            .map_err(|e| RpcError::new("get_transaction_receipt", e))?;
-
-        Ok(receipt)
-        */
-        todo!()
+            .map_err(|e| RpcError::new("get_transaction_receipt", e))?)
     }
 
     async fn get_transaction(&self, tx_hash: &H256) -> Result<Option<Transaction>> {
-        /*
         Ok(self
-            .provider
-            .get_transaction(*tx_hash)
+            .request("eth_getTransactionByHash", [tx_hash])
             .await
             .map_err(|e| RpcError::new("get_transaction", e))?)
-        */
-        todo!()
     }
 
     async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>> {
-        /*
         Ok(self
-            .provider
-            .get_logs(filter)
+            .request("eth_getLogs", [filter])
             .await
             .map_err(|e| RpcError::new("get_logs", e))?)
-        */
-        todo!()
     }
 
     async fn chain_id(&self) -> Result<u64> {
-        /*
         Ok(self
-            .provider
-            .get_chainid()
+            .request::<_, U256>("eth_chainId", ())
             .await
             .map_err(|e| RpcError::new("chain_id", e))?
             .as_u64())
-        */
-        todo!()
     }
 
     async fn get_fee_history(
@@ -172,14 +135,93 @@ impl ExecutionRpc for HttpRpc {
         last_block: u64,
         reward_percentiles: &[f64],
     ) -> Result<FeeHistory> {
-        /*
-        let block = BlockNumber::from(last_block);
-        Ok(self
-            .provider
-            .fee_history(block_count, block, reward_percentiles)
+        let block_count_u256 = serde_json::to_value(U256::from(block_count))?;
+        let block = serde_json::to_value(BlockNumber::from(last_block))?;
+        let reward_percentiles = serde_json::to_value(reward_percentiles)?;
+
+        // The blockCount param is expected to be an unsigned integer up to geth v1.10.6.
+        // Geth v1.10.7 onwards, this has been updated to a hex encoded form. Failure to
+        // decode the param from client side would fallback to the old API spec.
+        let result = match self
+            .request(
+                "eth_feeHistory",
+                [block_count_u256, block.clone(), reward_percentiles.clone()],
+            )
             .await
-            .map_err(|e| RpcError::new("fee_history", e))?)
-        */
-        todo!()
+        {
+            success @ Ok(_) => success,
+            err @ Err(_) => {
+                let fallback = self
+                    .request(
+                        "eth_feeHistory",
+                        [
+                            serde_json::to_value(block_count)?,
+                            block,
+                            reward_percentiles,
+                        ],
+                    )
+                    .await;
+
+                if fallback.is_err() {
+                    // if the older fallback also resulted in an error, we return the error from the
+                    // initial attempt
+                    err
+                } else {
+                    fallback
+                }
+            }
+        };
+
+        Ok(result.map_err(|e| RpcError::new("fee_history", e))?)
+    }
+}
+
+/// A JSON-RPC response
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum Response<T> {
+    Success {
+        #[serde(rename = "id")]
+        _id: u64,
+        result: T,
+    },
+    Error {
+        #[serde(rename = "id")]
+        _id: u64,
+        error: JsonRpcError,
+    },
+}
+
+impl HttpRpc {
+    async fn request<T: Serialize + Send + Sync, R: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: T,
+    ) -> Result<R> {
+        let next_id = self.id.fetch_add(1, Ordering::SeqCst);
+
+        let payload = serde_json::json!({
+            "id": next_id,
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+
+        let response = http::post(
+            &self.url,
+            &[("Content-Type", "application/json")],
+            serde_json::to_vec(&payload)?,
+        )
+        .await?;
+
+        if response.status != 200 {
+            let body = std::str::from_utf8(&response.body).unwrap_or("couldn't decode error");
+            Err(HttpError::Http(response.status, body.to_owned()))?;
+        }
+
+        match serde_json::from_slice(&response.body)? {
+            Response::Success { result, .. } => Ok(result),
+            Response::Error { error, .. } => Err(error)?,
+        }
     }
 }

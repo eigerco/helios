@@ -1,9 +1,130 @@
-use crate::errors::HttpError;
-use ic_cdk::api::management_canister::http_request::HttpResponse;
+pub struct HttpResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
 
-pub async fn http_get(url: &str) -> Result<HttpResponse, HttpError> {
-    let req = ic_http::create_request().get(url).build();
-    // TODO: should we pass cycles in http_get method or we should have a default one?
-    let resp = ic_http::http_request(req, 2_603_101_200).await?;
-    Ok(resp.0)
+#[cfg(target_arch = "wasm32")]
+pub use icp::{get, post};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use native::{get, post};
+
+#[cfg(target_arch = "wasm32")]
+mod icp {
+    use ic_cdk::api::management_canister::http_request::{
+        http_request, CanisterHttpRequestArgument, HttpHeader, HttpMethod,
+        HttpResponse as CanisterHttpResponse,
+    };
+
+    use crate::errors::HttpError;
+    use crate::icp::DEFAULT_HTTP_OUTCALL_COST;
+
+    use super::HttpResponse;
+
+    pub async fn get(url: &str) -> Result<HttpResponse, HttpError> {
+        let req = CanisterHttpRequestArgument {
+            url: url.to_owned(),
+            method: HttpMethod::GET,
+            ..Default::default()
+        };
+        let resp = http_request(req, DEFAULT_HTTP_OUTCALL_COST).await?;
+        resp.0.try_into()
+    }
+
+    pub async fn post(
+        url: &str,
+        headers: &[(&str, &str)],
+        body: Vec<u8>,
+    ) -> Result<HttpResponse, HttpError> {
+        let headers = headers
+            .iter()
+            .map(|(name, value)| HttpHeader {
+                name: name.to_string(),
+                value: value.to_string(),
+            })
+            .collect();
+        let req = CanisterHttpRequestArgument {
+            url: url.to_string(),
+            method: HttpMethod::POST,
+            headers,
+            body: Some(body),
+            ..Default::default()
+        };
+        let resp = http_request(req, DEFAULT_HTTP_OUTCALL_COST).await?;
+        resp.0.try_into()
+    }
+
+    impl TryFrom<CanisterHttpResponse> for HttpResponse {
+        type Error = HttpError;
+
+        fn try_from(value: CanisterHttpResponse) -> Result<Self, Self::Error> {
+            let status = value.status.0.try_into().map_err(|err| {
+                HttpError::Other(format!("Status should be a 3 digit number, got: {err}"))
+            })?;
+
+            Ok(Self {
+                status,
+                body: value.body,
+            })
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native {
+    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+
+    use crate::errors::HttpError;
+
+    use super::HttpResponse;
+
+    pub async fn get(url: &str) -> Result<HttpResponse, HttpError> {
+        let resp = reqwest::get(url)
+            .await
+            .map_err(|err| HttpError::Other(format!("Request failed: {err}")))?;
+        HttpResponse::from_reqwest(resp).await
+    }
+
+    pub async fn post(
+        url: &str,
+        headers: &[(&str, &str)],
+        body: Vec<u8>,
+    ) -> Result<HttpResponse, HttpError> {
+        let mut header_map = HeaderMap::new();
+        for &(name, value) in headers {
+            let name: HeaderName = name
+                .parse()
+                .map_err(|_| HttpError::Other(format!("Invalid header name: {name}")))?;
+            let value: HeaderValue = value
+                .parse()
+                .map_err(|_| HttpError::Other(format!("Invalid header value: {value}")))?;
+            header_map.insert(name, value);
+        }
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(url)
+            .body(body)
+            .headers(header_map)
+            .send()
+            .await
+            .map_err(|err| HttpError::Other(format!("Request failed: {err}")))?;
+
+        HttpResponse::from_reqwest(resp).await
+    }
+
+    impl HttpResponse {
+        async fn from_reqwest(resp: reqwest::Response) -> Result<Self, HttpError> {
+            let status = resp.status().as_u16();
+            let body = resp
+                .bytes()
+                .await
+                .map_err(|err| HttpError::Other(format!("Couldn't read response body: {err}")))?;
+
+            Ok(Self {
+                status,
+                body: body.into(),
+            })
+        }
+    }
 }
