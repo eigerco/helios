@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use ethers_core::types::transaction::eip2718::TypedTransaction;
-use ethers_core::types::transaction::eip2930::AccessList;
+use ethers_core::types::transaction::eip2930::{AccessList, AccessListWithGasUsed};
 use ethers_core::types::{
     Address, BlockId, BlockNumber, Bytes, EIP1186ProofResponse, Eip1559TransactionRequest,
     FeeHistory, Filter, Log, Transaction, TransactionReceipt, H256, U256,
@@ -74,9 +74,10 @@ impl ExecutionRpc for HttpRpc {
         let tx = serde_json::to_value(TypedTransaction::Eip1559(raw_tx))?;
 
         Ok(self
-            .request("eth_createAccessList", [tx, block])
+            .request::<_, AccessListWithGasUsed>("eth_createAccessList", [tx, block])
             .await
-            .map_err(|e| RpcError::new("create_access_list", e))?)
+            .map_err(|e| RpcError::new("create_access_list", e))?
+            .access_list)
     }
 
     async fn get_code(&self, address: &Address, block: u64) -> Result<Vec<u8>> {
@@ -84,9 +85,10 @@ impl ExecutionRpc for HttpRpc {
         let block = serde_json::to_value(BlockId::from(block))?;
 
         Ok(self
-            .request("eth_getCode", [address, block])
+            .request::<_, Bytes>("eth_getCode", [address, block])
             .await
-            .map_err(|e| RpcError::new("get_code", e))?)
+            .map_err(|e| RpcError::new("get_code", e))?
+            .to_vec())
     }
 
     async fn send_raw_transaction(&self, bytes: &[u8]) -> Result<H256> {
@@ -121,9 +123,10 @@ impl ExecutionRpc for HttpRpc {
 
     async fn chain_id(&self) -> Result<u64> {
         Ok(self
-            .request("eth_chainId", ())
+            .request::<_, U256>("eth_chainId", ())
             .await
-            .map_err(|e| RpcError::new("chain_id", e))?)
+            .map_err(|e| RpcError::new("chain_id", e))?
+            .as_u64())
     }
 
     async fn get_fee_history(
@@ -176,11 +179,11 @@ impl ExecutionRpc for HttpRpc {
 /// A JSON-RPC response
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
-enum Response<'a> {
+enum Response<T> {
     Success {
         #[serde(rename = "id")]
         _id: u64,
-        result: &'a str,
+        result: T,
     },
     Error {
         #[serde(rename = "id")]
@@ -217,7 +220,7 @@ impl HttpRpc {
         }
 
         match serde_json::from_slice(&response.body)? {
-            Response::Success { result, .. } => Ok(serde_json::from_str(result)?),
+            Response::Success { result, .. } => Ok(result),
             Response::Error { error, .. } => Err(error)?,
         }
     }
