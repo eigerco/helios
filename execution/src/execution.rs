@@ -12,7 +12,6 @@ use eyre::Result;
 use common::utils::hex_str_to_bytes;
 use consensus::types::ExecutionPayload;
 use futures::future::join_all;
-use revm::KECCAK_EMPTY;
 use triehash_ethereum::ordered_trie_root;
 
 use crate::errors::ExecutionError;
@@ -25,6 +24,11 @@ use super::types::{Account, ExecutionBlock};
 // We currently limit the max number of logs to fetch,
 // to avoid blocking the client for too long.
 const MAX_SUPPORTED_LOGS_NUMBER: usize = 5;
+
+const KECCAK_EMPTY: H256 = H256([
+    0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03, 0xc0,
+    0xe5, 0x00, 0xb6, 0x53, 0xca, 0x82, 0x27, 0x3b, 0x7b, 0xfa, 0xd8, 0x04, 0x5d, 0x85, 0xa4, 0x70,
+]);
 
 #[derive(Clone)]
 pub struct ExecutionClient<R: ExecutionRpc> {
