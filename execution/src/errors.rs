@@ -42,13 +42,16 @@ pub enum ExecutionError {
 #[derive(Debug, Error)]
 pub enum EvmError {
     #[error("execution reverted: {0:?}")]
-    Revert(Option<Bytes>),
+    Revert(Bytes),
+
+    #[error("execution halted: {0:?}")]
+    Halt(revm::primitives::Halt),
 
     #[error("evm error: {0:?}")]
     Generic(String),
 
-    #[error("evm execution failed: {0:?}")]
-    Revm(revm::Return),
+    #[error("evm execution failed: {}", revm_error_to_string(.0))]
+    Revm(revm::primitives::EVMError<Report>),
 
     #[error("rpc error: {0:?}")]
     RpcError(Report),
@@ -63,5 +66,21 @@ impl EvmError {
             return None;
         }
         String::decode(&data[4..]).ok()
+    }
+}
+
+impl From<revm::primitives::EVMError<Report>> for EvmError {
+    fn from(value: revm::primitives::EVMError<Report>) -> Self {
+        EvmError::Revm(value)
+    }
+}
+
+fn revm_error_to_string(e: &revm::primitives::EVMError<Report>) -> String {
+    use revm::primitives::EVMError;
+
+    match e {
+        EVMError::Transaction(v) => format!("Transaction error: {:?}", v),
+        EVMError::PrevrandaoNotSet => "Prevrandao not set".to_string(),
+        EVMError::Database(v) => format!("Database error: {}", v),
     }
 }

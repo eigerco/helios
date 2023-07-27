@@ -12,12 +12,15 @@ use common::{
 use ethers_core::{
     abi::ethereum_types::BigEndianHash,
     types::transaction::eip2930::AccessListItem,
-    types::{Address, H160, H256, U256},
+    types::{Address, H256, U256},
 };
 use eyre::{Report, Result};
 use futures::{executor::block_on, future::join_all};
 use log::trace;
-use revm::{AccountInfo, Bytecode, Database, Env, TransactOut, TransactTo, EVM};
+use revm::primitives::{
+    AccountInfo, Bytecode, Env, ExecutionResult, Output, TransactTo, B160, B256, U256 as RU256,
+};
+use revm::{Database, EVM};
 
 use consensus::types::ExecutionPayload;
 
@@ -54,25 +57,15 @@ impl<'a, R: ExecutionRpc> Evm<'a, R> {
         self.evm.db.as_mut().unwrap().set_accounts(account_map);
 
         self.evm.env = self.get_env(opts);
-        let tx = self.evm.transact().0;
+        let tx = self.evm.transact()?;
 
-        match tx.exit_reason {
-            revm::Return::Revert => match tx.out {
-                TransactOut::Call(bytes) => Err(EvmError::Revert(Some(bytes))),
-                _ => Err(EvmError::Revert(None)),
+        match tx.result {
+            ExecutionResult::Success { output, .. } => match output {
+                Output::Call(bytes) => Ok(bytes.to_vec()),
+                Output::Create(..) => Err(EvmError::Generic("Invalid Call".to_string())),
             },
-            revm::Return::Return | revm::Return::Stop => {
-                if let Some(err) = &self.evm.db.as_ref().unwrap().error {
-                    return Err(EvmError::Generic(err.clone()));
-                }
-
-                match tx.out {
-                    TransactOut::None => Err(EvmError::Generic("Invalid Call".to_string())),
-                    TransactOut::Create(..) => Err(EvmError::Generic("Invalid Call".to_string())),
-                    TransactOut::Call(bytes) => Ok(bytes.to_vec()),
-                }
-            }
-            _ => Err(EvmError::Revm(tx.exit_reason)),
+            ExecutionResult::Revert { output, .. } => Err(EvmError::Revert(output)),
+            ExecutionResult::Halt { reason, .. } => Err(EvmError::Halt(reason)),
         }
     }
 
@@ -81,24 +74,16 @@ impl<'a, R: ExecutionRpc> Evm<'a, R> {
         self.evm.db.as_mut().unwrap().set_accounts(account_map);
 
         self.evm.env = self.get_env(opts);
-        let tx = self.evm.transact().0;
-        let gas = tx.gas_used;
+        let tx = self.evm.transact()?;
 
-        match tx.exit_reason {
-            revm::Return::Revert => match tx.out {
-                TransactOut::Call(bytes) => Err(EvmError::Revert(Some(bytes))),
-                _ => Err(EvmError::Revert(None)),
-            },
-            revm::Return::Return | revm::Return::Stop => {
-                if let Some(err) = &self.evm.db.as_ref().unwrap().error {
-                    return Err(EvmError::Generic(err.clone()));
-                }
-
+        match tx.result {
+            ExecutionResult::Success { gas_used, .. } => {
                 // overestimate to avoid out of gas reverts
-                let gas_scaled = (1.10 * gas as f64) as u64;
+                let gas_scaled = (1.10 * gas_used as f64) as u64;
                 Ok(gas_scaled)
             }
-            _ => Err(EvmError::Revm(tx.exit_reason)),
+            ExecutionResult::Revert { output, .. } => Err(EvmError::Revert(output)),
+            ExecutionResult::Halt { reason, .. } => Err(EvmError::Halt(reason)),
         }
     }
 
@@ -174,19 +159,19 @@ impl<'a, R: ExecutionRpc> Evm<'a, R> {
         let mut env = Env::default();
         let payload = &self.evm.db.as_ref().unwrap().current_payload;
 
-        env.tx.transact_to = TransactTo::Call(opts.to.unwrap_or_default());
-        env.tx.caller = opts.from.unwrap_or(Address::zero());
-        env.tx.value = opts.value.unwrap_or(U256::from(0));
+        env.tx.transact_to = TransactTo::Call(opts.to.unwrap_or_default().into());
+        env.tx.caller = opts.from.unwrap_or(Address::zero()).into();
+        env.tx.value = opts.value.unwrap_or(U256::from(0)).into();
         env.tx.data = Bytes::from(opts.data.clone().unwrap_or_default());
         env.tx.gas_limit = opts.gas.map(|v| v.as_u64()).unwrap_or(u64::MAX);
-        env.tx.gas_price = opts.gas_price.unwrap_or(U256::zero());
+        env.tx.gas_price = opts.gas_price.unwrap_or(U256::zero()).into();
 
-        env.block.number = U256::from(*payload.block_number());
-        env.block.coinbase = Address::from_slice(payload.fee_recipient());
-        env.block.timestamp = U256::from(*payload.timestamp());
-        env.block.difficulty = U256::from_little_endian(payload.prev_randao());
+        env.block.number = U256::from(*payload.block_number()).into();
+        env.block.coinbase = Address::from_slice(payload.fee_recipient()).into();
+        env.block.timestamp = U256::from(*payload.timestamp()).into();
+        env.block.difficulty = U256::from_little_endian(payload.prev_randao()).into();
 
-        env.cfg.chain_id = self.chain_id.into();
+        env.cfg.chain_id = self.chain_id.try_into().expect("u64 to u256");
 
         env
     }
@@ -197,7 +182,6 @@ struct ProofDB<'a, R: ExecutionRpc> {
     current_payload: &'a ExecutionPayload,
     payloads: &'a BTreeMap<u64, ExecutionPayload>,
     accounts: HashMap<Address, Account>,
-    error: Option<String>,
 }
 
 impl<'a, R: ExecutionRpc> ProofDB<'a, R> {
@@ -211,7 +195,6 @@ impl<'a, R: ExecutionRpc> ProofDB<'a, R> {
             current_payload,
             payloads,
             accounts: HashMap::new(),
-            error: None,
         }
     }
 
@@ -244,7 +227,9 @@ impl<'a, R: ExecutionRpc> ProofDB<'a, R> {
 impl<'a, R: ExecutionRpc> Database for ProofDB<'a, R> {
     type Error = Report;
 
-    fn basic(&mut self, address: H160) -> Result<Option<AccountInfo>, Report> {
+    fn basic(&mut self, address: B160) -> Result<Option<AccountInfo>, Report> {
+        let address: Address = address.into();
+
         if is_precompile(&address) {
             return Ok(Some(AccountInfo::default()));
         }
@@ -261,27 +246,31 @@ impl<'a, R: ExecutionRpc> Database for ProofDB<'a, R> {
 
         let bytecode = Bytecode::new_raw(Bytes::from(account.code.clone()));
         Ok(Some(AccountInfo::new(
-            account.balance,
+            account.balance.into(),
             account.nonce,
             bytecode,
         )))
     }
 
-    fn block_hash(&mut self, number: U256) -> Result<H256, Report> {
+    fn block_hash(&mut self, number: RU256) -> Result<B256, Report> {
+        let number: U256 = number.into();
         let number = number.as_u64();
         let payload = self
             .payloads
             .get(&number)
             .ok_or(BlockNotFoundError::new(BlockTag::Number(number)))?;
-        Ok(H256::from_slice(payload.block_hash()))
+        Ok(H256::from_slice(payload.block_hash()).into())
     }
 
-    fn storage(&mut self, address: H160, slot: U256) -> Result<U256, Report> {
+    fn storage(&mut self, address: B160, slot: RU256) -> Result<RU256, Report> {
+        let address: Address = address.into();
+        let slot: U256 = slot.into();
+
         trace!("fetch evm state for address={:?}, slot={}", address, slot);
 
         let slot = H256::from_uint(&slot);
 
-        Ok(match self.accounts.get(&address) {
+        let value = match self.accounts.get(&address) {
             Some(account) => match account.slots.get(&slot) {
                 Some(slot) => *slot,
                 None => *self
@@ -295,10 +284,12 @@ impl<'a, R: ExecutionRpc> Database for ProofDB<'a, R> {
                 .slots
                 .get(&slot)
                 .ok_or(SlotNotFoundError::new(slot))?,
-        })
+        };
+
+        Ok(value.into())
     }
 
-    fn code_by_hash(&mut self, _code_hash: H256) -> Result<Bytecode, Report> {
+    fn code_by_hash(&mut self, _code_hash: B256) -> Result<Bytecode, Report> {
         Err(eyre::eyre!("should never be called"))
     }
 }

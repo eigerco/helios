@@ -44,14 +44,14 @@ impl NodeError {
             NodeError::ExecutionEvmError(evm_err) => match evm_err {
                 EvmError::Revert(data) => {
                     let mut msg = "execution reverted".to_string();
-                    if let Some(reason) = data.as_ref().and_then(EvmError::decode_revert_reason) {
+                    if let Some(reason) = EvmError::decode_revert_reason(&data) {
                         msg = format!("{msg}: {reason}")
                     }
                     jsonrpsee::core::Error::Call(jsonrpsee::types::error::CallError::Custom(
                         jsonrpsee::types::error::ErrorObject::owned(
                             3,
                             msg,
-                            data.map(|data| format!("0x{}", hex::encode(data))),
+                            Some(format!("0x{}", hex::encode(&data))),
                         ),
                     ))
                 }
