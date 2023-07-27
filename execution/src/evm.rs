@@ -15,7 +15,7 @@ use ethers_core::{
     types::{Address, H256, U256},
 };
 use eyre::{Report, Result};
-use futures::{executor::block_on, future::join_all};
+use futures::future::join_all;
 use log::trace;
 use revm::primitives::{
     AccountInfo, Bytecode, Env, ExecutionResult, Output, TransactTo, B160, B256, U256 as RU256,
@@ -203,24 +203,28 @@ impl<'a, R: ExecutionRpc> ProofDB<'a, R> {
     }
 
     fn get_account(&mut self, address: Address, slots: &[H256]) -> Result<Account> {
-        /*
-        let execution = self.execution.clone();
-        let payload = self.current_payload.clone();
-        let slots = slots.to_owned();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let execution = self.execution.clone();
+            let payload = self.current_payload.clone();
+            let slots = slots.to_owned();
 
-        let handle = tokio::task::spawn_blocking(move || {
-            block_on(execution.get_account(&address, Some(&slots), &payload))
-        });
+            tokio::task::block_in_place(move || {
+                tokio::runtime::Handle::current().block_on(execution.get_account(
+                    &address,
+                    Some(&slots),
+                    &payload,
+                ))
+            })
+        }
 
-        block_on(handle)?
-        */
-
-        // TODO: The above is the original implementation, but it can not be used
-        // in WASM environments.
-        //
-        // We are also not sure if this will ever be triggered since batch_fetch_accounts
-        // is pre-fetching the accounts.
-        panic!("not supported in wasm");
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = address;
+            let _ = slots;
+            // TODO: we need to convert the `revm` to async in order to use it here
+            panic!("not supported in wasm");
+        }
     }
 }
 
