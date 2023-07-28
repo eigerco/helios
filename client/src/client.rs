@@ -319,9 +319,23 @@ impl<DB: Database> Client<DB> {
         let node = self.node.clone();
         spawn(async move {
             loop {
-                let res = node.write().await.advance().await;
+                let new_consensus = match node.read().await.advance_consensus() {
+                    Ok(consensus) => consensus,
+                    Err(err) => {
+                        warn!("consensus error: {err}");
+                        return;
+                    }
+                };
+                let payloads = match node.read().await.get_payloads_update(&new_consensus).await {
+                    Ok(payloads) => payloads,
+                    Err(err) => {
+                        warn!("consensus error: {err}");
+                        return;
+                    }
+                };
+                let res = node.write().await.advance(new_consensus, payloads).await;
                 if let Err(err) = res {
-                    warn!("consensus error: {}", err);
+                    warn!("consensus error: {err}");
                 }
 
                 let next_update = node.read().await.duration_until_next_update();
@@ -334,16 +348,48 @@ impl<DB: Database> Client<DB> {
     #[cfg(target_arch = "wasm32")]
     fn start_advance_thread(&self) {
         use std::time::Duration;
+        use tokio::sync::Mutex;
 
         let node = self.node.clone();
+        let update_guard = Arc::new(Mutex::new(()));
 
+        // TODO: this interval is not cleaned on canister updates, and it keeps the node clone
         set_timer_interval(Duration::from_secs(12), move || {
             let node = node.clone();
+            let update_guard = update_guard.clone();
+
             spawn(async move {
-                let res = node.write().await.advance().await;
-                if let Err(err) = res {
-                    warn!("consensus error: {}", err);
+                let _guard = match update_guard.try_lock() {
+                    Ok(guard) => guard,
+                    _ => {
+                        log::debug!("Advancing already in progress");
+                        return;
+                    }
+                };
+
+                info!("Advancing the client");
+
+                let new_consensus = match node.read().await.advance_consensus().await {
+                    Ok(consensus) => consensus,
+                    Err(err) => {
+                        warn!("consensus error: {err}");
+                        return;
+                    }
+                };
+
+                let payloads = match node.read().await.get_payloads_update(&new_consensus).await {
+                    Ok(payloads) => payloads,
+                    Err(err) => {
+                        warn!("consensus error: {err}");
+                        return;
+                    }
+                };
+
+                if let Err(err) = node.write().await.advance(new_consensus, payloads).await {
+                    warn!("advancing node error: {err}");
                 }
+
+                info!("Advancing finished");
             });
         });
     }
@@ -527,6 +573,7 @@ impl<DB: Database> Client<DB> {
     }
 
     pub async fn get_block_number(&self) -> Result<u64> {
+        info!("Getting block number");
         self.node.read().await.get_block_number()
     }
 
