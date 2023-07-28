@@ -322,20 +322,20 @@ impl<DB: Database> Client<DB> {
                 let new_consensus = match node.read().await.advance_consensus() {
                     Ok(consensus) => consensus,
                     Err(err) => {
-                        warn!("consensus error: {err}");
+                        warn!("advancing consensus error: {err}");
                         return;
                     }
                 };
                 let payloads = match node.read().await.get_payloads_update(&new_consensus).await {
                     Ok(payloads) => payloads,
                     Err(err) => {
-                        warn!("consensus error: {err}");
+                        warn!("getting payloads update error: {err}");
                         return;
                     }
                 };
                 let res = node.write().await.advance(new_consensus, payloads).await;
                 if let Err(err) = res {
-                    warn!("consensus error: {err}");
+                    warn!("advancing node error: {err}");
                 }
 
                 let next_update = node.read().await.duration_until_next_update();
@@ -372,7 +372,7 @@ impl<DB: Database> Client<DB> {
                 let new_consensus = match node.read().await.advance_consensus().await {
                     Ok(consensus) => consensus,
                     Err(err) => {
-                        warn!("consensus error: {err}");
+                        warn!("advancing consensus error: {err}");
                         return;
                     }
                 };
@@ -380,7 +380,7 @@ impl<DB: Database> Client<DB> {
                 let payloads = match node.read().await.get_payloads_update(&new_consensus).await {
                     Ok(payloads) => payloads,
                     Err(err) => {
-                        warn!("consensus error: {err}");
+                        warn!("getting payloads update error: {err}");
                         return;
                     }
                 };
