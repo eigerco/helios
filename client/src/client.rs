@@ -319,7 +319,7 @@ impl<DB: Database> Client<DB> {
         let node = self.node.clone();
         spawn(async move {
             loop {
-                let new_consensus = match node.read().await.advance_consensus() {
+                let new_consensus = match node.read().await.advance_consensus().await {
                     Ok(consensus) => consensus,
                     Err(err) => {
                         warn!("advancing consensus error: {err}");
