@@ -18,9 +18,11 @@ use eyre::{Report, Result};
 use futures::future::join_all;
 use log::trace;
 use revm::primitives::{
-    AccountInfo, Bytecode, Env, ExecutionResult, Output, TransactTo, B160, B256, U256 as RU256,
+    AccountInfo, Bytecode, Env, ExecutionResult, Output, ResultAndState, TransactTo, B160, B256,
+    U256 as RU256,
 };
 use revm::{Database, EVM};
+use thiserror::Error;
 
 use consensus::types::ExecutionPayload;
 
@@ -36,6 +38,13 @@ use super::ExecutionClient;
 pub struct Evm<'a, R: ExecutionRpc> {
     evm: EVM<ProofDB<'a, R>>,
     chain_id: u64,
+}
+
+#[derive(Debug, Error)]
+#[error("Missing slots. Address: {address}, Slots: {slots:?}")]
+struct MissingSlots {
+    address: Address,
+    slots: Vec<H256>,
 }
 
 impl<'a, R: ExecutionRpc> Evm<'a, R> {
@@ -57,7 +66,7 @@ impl<'a, R: ExecutionRpc> Evm<'a, R> {
         self.evm.db.as_mut().unwrap().set_accounts(account_map);
 
         self.evm.env = self.get_env(opts);
-        let tx = self.evm.transact()?;
+        let tx = self.revm_transact().await?;
 
         match tx.result {
             ExecutionResult::Success { output, .. } => match output {
@@ -74,7 +83,7 @@ impl<'a, R: ExecutionRpc> Evm<'a, R> {
         self.evm.db.as_mut().unwrap().set_accounts(account_map);
 
         self.evm.env = self.get_env(opts);
-        let tx = self.evm.transact()?;
+        let tx = self.revm_transact().await?;
 
         match tx.result {
             ExecutionResult::Success { gas_used, .. } => {
@@ -84,6 +93,42 @@ impl<'a, R: ExecutionRpc> Evm<'a, R> {
             }
             ExecutionResult::Revert { output, .. } => Err(EvmError::Revert(output)),
             ExecutionResult::Halt { reason, .. } => Err(EvmError::Halt(reason)),
+        }
+    }
+
+    async fn revm_transact(&mut self) -> Result<ResultAndState, EvmError> {
+        use revm::primitives::EVMError;
+
+        // Workaround for enabling of fetching missing slots in WASM.
+        //
+        // Because WASM is single-threaded and revm is not async, we can not execute
+        // any async request in the `Database` trait. As a workaround we propagate
+        // the missing slot in the error, we fetch it, and retry again.
+        loop {
+            let missing_slots: MissingSlots = match self.evm.transact() {
+                Ok(tx) => return Ok(tx),
+                Err(EVMError::Database(e)) => e.downcast().map_err(EVMError::Database)?,
+                Err(e) => Err(e)?,
+            };
+
+            let db = self.evm.db.as_mut().expect("evm not initialized correctly");
+            let address = missing_slots.address;
+            let mut slots = missing_slots.slots;
+
+            // Merge the slots we need.
+            if let Some(account) = db.accounts.get(&address) {
+                slots.extend(account.slots.keys());
+            }
+
+            // Get the account
+            let account = db
+                .execution
+                .get_account(&address, Some(&slots[..]), db.current_payload)
+                .await
+                .map_err(EvmError::RpcError)?;
+
+            // Update the account
+            db.accounts.insert(address, account);
         }
     }
 
@@ -131,6 +176,7 @@ impl<'a, R: ExecutionRpc> Evm<'a, R> {
         list.push(to_access_entry);
         list.push(producer_account);
 
+        // TODO: fetch everything with 1 request!
         let mut account_map = HashMap::new();
         for chunk in list.chunks(PARALLEL_QUERY_BATCH_SIZE) {
             let account_chunk_futs = chunk.iter().map(|account| {
@@ -220,10 +266,12 @@ impl<'a, R: ExecutionRpc> ProofDB<'a, R> {
 
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = address;
-            let _ = slots;
-            // TODO: we need to convert the `revm` to async in order to use it here
-            panic!("not supported in wasm");
+            // Inform the caller which slot is missing.
+            Err(MissingSlots {
+                address,
+                slots: slots.to_vec(),
+            }
+            .into())
         }
     }
 }
