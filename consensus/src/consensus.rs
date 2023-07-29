@@ -26,14 +26,26 @@ use super::utils::*;
 
 #[derive(Debug)]
 pub struct ConsensusClient<R: ConsensusRpc> {
-    rpc: R,
+    rpc: Arc<R>,
     store: LightClientStore,
     initial_checkpoint: Vec<u8>,
     pub last_checkpoint: Option<Vec<u8>>,
     pub config: Arc<Config>,
 }
 
-#[derive(Debug, Default)]
+impl<R: ConsensusRpc> Clone for ConsensusClient<R> {
+    fn clone(&self) -> Self {
+        Self {
+            rpc: self.rpc.clone(),
+            store: self.store.clone(),
+            initial_checkpoint: self.initial_checkpoint.clone(),
+            last_checkpoint: self.last_checkpoint.clone(),
+            config: self.config.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
 struct LightClientStore {
     finalized_header: Header,
     current_sync_committee: SyncCommittee,
@@ -49,7 +61,7 @@ impl<R: ConsensusRpc> ConsensusClient<R> {
         checkpoint_block_root: &[u8],
         config: Arc<Config>,
     ) -> Result<ConsensusClient<R>> {
-        let rpc = R::new(rpc);
+        let rpc = Arc::new(R::new(rpc));
 
         Ok(ConsensusClient {
             rpc,
