@@ -367,9 +367,9 @@ dependencies = [
 
 [[package]]
 name = "candid"
-version = "0.9.1"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4df671c37a9c6168db0334f2b289dd4e02dea1bbefe1fb22c5d43b12d865aacd"
+checksum = "a31e5ab22cdcd093b93b02bdff4ba18ffee324b05e669b25cdd93fdb8402d207"
 dependencies = [
  "anyhow",
  "binread",
@@ -660,6 +660,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 name = "common"
 version = "0.4.1"
 dependencies = [
+ "candid",
  "ethers-core",
  "eyre",
  "hex",
