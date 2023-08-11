@@ -1,6 +1,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use config::networks::Network;
 use consensus::errors::ConsensusError;
@@ -21,12 +21,14 @@ use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
 #[cfg(not(target_arch = "wasm32"))]
+use tokio::task::AbortHandle;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::sleep;
 
 #[cfg(target_arch = "wasm32")]
 use ic_cdk::spawn;
 #[cfg(target_arch = "wasm32")]
-use ic_cdk_timers::set_timer_interval;
+use ic_cdk_timers::{clear_timer, set_timer_interval, TimerId};
 
 use crate::database::Database;
 use crate::errors::NodeError;
@@ -236,6 +238,10 @@ pub struct Client<DB: Database> {
     db: DB,
     fallback: Option<String>,
     load_external_fallback: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    abort_handle: StdMutex<Option<AbortHandle>>,
+    #[cfg(target_arch = "wasm32")]
+    timer_id: StdMutex<Option<TimerId>>,
 }
 
 impl<DB: Database> Client<DB> {
@@ -265,6 +271,10 @@ impl<DB: Database> Client<DB> {
             db,
             fallback: config.fallback.clone(),
             load_external_fallback: config.load_external_fallback,
+            #[cfg(not(target_arch = "wasm32"))]
+            abort_handle: StdMutex::new(None),
+            #[cfg(target_arch = "wasm32")]
+            timer_id: StdMutex::new(None),
         })
     }
 
@@ -317,7 +327,8 @@ impl<DB: Database> Client<DB> {
     #[cfg(not(target_arch = "wasm32"))]
     fn start_advance_thread(&self) {
         let node = self.node.clone();
-        spawn(async move {
+
+        let handle = spawn(async move {
             loop {
                 let new_consensus = match node.read().await.advance_consensus().await {
                     Ok(consensus) => consensus,
@@ -343,6 +354,8 @@ impl<DB: Database> Client<DB> {
                 sleep(next_update).await;
             }
         });
+
+        *self.abort_handle.lock().unwrap() = Some(handle.abort_handle());
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -353,8 +366,7 @@ impl<DB: Database> Client<DB> {
         let node = self.node.clone();
         let update_guard = Arc::new(Mutex::new(()));
 
-        // TODO: this interval is not cleaned on canister updates, and it keeps the node clone
-        set_timer_interval(Duration::from_secs(12), move || {
+        let timer_id = set_timer_interval(Duration::from_secs(14), move || {
             let node = node.clone();
             let update_guard = update_guard.clone();
 
@@ -392,6 +404,8 @@ impl<DB: Database> Client<DB> {
                 info!("Advancing finished");
             });
         });
+
+        *self.timer_id.lock().unwrap() = Some(timer_id);
     }
 
     async fn boot_from_fallback(&self) -> eyre::Result<()> {
@@ -477,6 +491,24 @@ impl<DB: Database> Client<DB> {
     }
 
     pub async fn shutdown(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let handle = self.abort_handle.lock().unwrap().take();
+
+            if let Some(handle) = handle {
+                handle.abort();
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let id = self.timer_id.lock().unwrap().take();
+
+            if let Some(id) = id {
+                clear_timer(id);
+            }
+        }
+
         self.save_last_checkpoint().await;
     }
 
