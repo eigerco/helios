@@ -490,6 +490,14 @@ impl<DB: Database> Client<DB> {
         };
     }
 
+    pub async fn get_last_checkpoint(&self) -> Option<String> {
+        self.node
+            .read()
+            .await
+            .get_last_checkpoint()
+            .map(|checkpoint| format!("0x{}", hex::encode(checkpoint)))
+    }
+
     pub async fn shutdown(&self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
