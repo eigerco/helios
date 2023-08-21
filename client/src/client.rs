@@ -366,7 +366,7 @@ impl<DB: Database> Client<DB> {
         let node = self.node.clone();
         let update_guard = Arc::new(Mutex::new(()));
 
-        let timer_id = set_timer_interval(Duration::from_secs(14), move || {
+        let timer_id = set_timer_interval(Duration::from_secs(12), move || {
             let node = node.clone();
             let update_guard = update_guard.clone();
 
