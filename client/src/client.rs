@@ -30,7 +30,9 @@ use ic_cdk::spawn;
 #[cfg(target_arch = "wasm32")]
 use ic_cdk_timers::{clear_timer, set_timer_interval, TimerId};
 #[cfg(target_arch = "wasm32")]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::cell::Cell;
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
 #[cfg(target_arch = "wasm32")]
 use std::time::Duration;
 
@@ -332,15 +334,14 @@ impl<DB: Database> Client<DB> {
 
                 let mut node = Node::clone(&*arc_swap_node.load());
 
-                if let Err(e) = node.advance().await {
-                    warn!("advancing node error: {e}");
+                match node.advance().await {
+                    Ok(_) => arc_swap_node.store(Arc::new(node)),
+                    Err(e) => warn!("advancing node error: {e}"),
                 }
-
-                let next_update = node.duration_until_next_update();
-                arc_swap_node.store(Arc::new(node));
 
                 debug!("Advancing finished");
 
+                let next_update = arc_swap_node.load().duration_until_next_update();
                 sleep(next_update).await;
             }
         });
@@ -351,40 +352,32 @@ impl<DB: Database> Client<DB> {
     #[cfg(target_arch = "wasm32")]
     fn start_advance_thread(&self) {
         let arc_swap_node = self.node.clone();
-        let updating = Arc::new(AtomicBool::new(false));
+        let in_progress = Rc::new(Cell::new(false));
 
         let timer_id = set_timer_interval(Duration::from_secs(12), move || {
             let arc_swap_node = arc_swap_node.clone();
-            let updating = updating.clone();
+            let in_progress = in_progress.clone();
+
+            if in_progress.get() {
+                debug!("Advancing already in progress");
+                return;
+            }
 
             spawn(async move {
-                // Guarding must be done within the same task that ungaurding is done.
-                //
-                // This is because if ICP execution fails, the mutations of the task will be
-                // reverted, including the guarding.
-                //
-                // If guarding was done before the newly spawned task, then on failure guarding
-                // will never be reverted.
-                if updating
-                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_err()
-                {
-                    debug!("Advancing already in progress");
-                    return;
-                }
-
+                // This should not be set before the `spawn` because we want to make sure
+                // that if there is an ICP failure, the flag will be reverted by ICP.
+                in_progress.set(true);
                 debug!("Advancing the client");
 
                 let mut node = Node::clone(&*arc_swap_node.load());
 
-                if let Err(e) = node.advance().await {
-                    warn!("advancing node error: {e}");
+                match node.advance().await {
+                    Ok(_) => arc_swap_node.store(Arc::new(node)),
+                    Err(e) => warn!("advancing node error: {e}"),
                 }
 
-                arc_swap_node.store(Arc::new(node));
-                updating.store(false, Ordering::SeqCst);
-
                 debug!("Advancing finished");
+                in_progress.set(false);
             });
         });
 
