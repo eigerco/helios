@@ -571,11 +571,11 @@ impl<DB: Database> Client<DB> {
     }
 
     pub fn get_gas_price(&self) -> Result<U256> {
-        self.node.load_full().get_gas_price()
+        self.node.load().get_gas_price()
     }
 
     pub fn get_priority_fee(&self) -> Result<U256> {
-        self.node.load_full().get_priority_fee()
+        self.node.load().get_priority_fee()
     }
 
     pub fn get_block_number(&self) -> Result<u64> {

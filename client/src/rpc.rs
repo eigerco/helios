@@ -155,7 +155,7 @@ impl EthRpcServer for RpcInner {
 
     async fn get_block_transaction_count_by_hash(&self, hash: &str) -> Result<String, Error> {
         let hash = convert_err(hex_str_to_bytes(hash))?;
-        let node = self.node.load_full();
+        let node = self.node.load();
         let transaction_count = convert_err(node.get_block_transaction_count_by_hash(&hash))?;
 
         Ok(u64_to_hex_string(transaction_count))
@@ -165,7 +165,7 @@ impl EthRpcServer for RpcInner {
         &self,
         block: BlockTag,
     ) -> Result<String, Error> {
-        let node = self.node.load_full();
+        let node = self.node.load();
         let transaction_count = convert_err(node.get_block_transaction_count_by_number(block))?;
         Ok(u64_to_hex_string(transaction_count))
     }
@@ -200,25 +200,25 @@ impl EthRpcServer for RpcInner {
     }
 
     async fn chain_id(&self) -> Result<String, Error> {
-        let node = self.node.load_full();
+        let node = self.node.load();
         let id = node.chain_id();
         Ok(u64_to_hex_string(id))
     }
 
     async fn gas_price(&self) -> Result<String, Error> {
-        let node = self.node.load_full();
+        let node = self.node.load();
         let gas_price = convert_err(node.get_gas_price())?;
         Ok(format_hex(&gas_price))
     }
 
     async fn max_priority_fee_per_gas(&self) -> Result<String, Error> {
-        let node = self.node.load_full();
+        let node = self.node.load();
         let tip = convert_err(node.get_priority_fee())?;
         Ok(format_hex(&tip))
     }
 
     async fn block_number(&self) -> Result<String, Error> {
-        let node = self.node.load_full();
+        let node = self.node.load();
         let num = convert_err(node.get_block_number())?;
         Ok(u64_to_hex_string(num))
     }
@@ -281,12 +281,12 @@ impl EthRpcServer for RpcInner {
     }
 
     async fn coinbase(&self) -> Result<Address, Error> {
-        let node = self.node.load_full();
+        let node = self.node.load();
         Ok(node.get_coinbase().unwrap())
     }
 
     async fn syncing(&self) -> Result<SyncingStatus, Error> {
-        let node = self.node.load_full();
+        let node = self.node.load();
         convert_err(node.syncing())
     }
 
@@ -312,7 +312,7 @@ impl EthRpcServer for RpcInner {
 #[async_trait]
 impl NetRpcServer for RpcInner {
     async fn version(&self) -> Result<String, Error> {
-        let node = self.node.load_full();
+        let node = self.node.load();
         Ok(node.chain_id().to_string())
     }
 }
