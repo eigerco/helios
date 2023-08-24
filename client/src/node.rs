@@ -22,12 +22,7 @@ use execution::ExecutionClient;
 
 use crate::errors::NodeError;
 
-pub struct PayloadsUpdate {
-    latest_payload: ExecutionPayload,
-    finalized_payload: ExecutionPayload,
-    backfill_payloads: Vec<ExecutionPayload>,
-}
-
+#[derive(Clone)]
 pub struct Node {
     pub consensus: ConsensusClient<NimbusRpc>,
     pub execution: Arc<ExecutionClient<HttpRpc>>,
@@ -81,55 +76,15 @@ impl Node {
             .await
             .map_err(NodeError::ConsensusSyncError)?;
 
-        let payloads = self.get_payloads_update(&self.consensus).await?;
-
-        self.update_payloads(payloads).await
+        self.update_payloads().await
     }
 
-    pub async fn advance_consensus(&self) -> Result<ConsensusClient<NimbusRpc>> {
-        let mut new_consensus = self.consensus.clone();
-        new_consensus.advance().await?;
-        Ok(new_consensus)
-    }
-
-    pub async fn get_payloads_update(
-        &self,
-        new_consensus: &ConsensusClient<NimbusRpc>,
-    ) -> Result<PayloadsUpdate, NodeError> {
-        let latest_header = new_consensus.get_header();
-        let latest_payload = new_consensus
-            .get_execution_payload(&Some(latest_header.slot))
+    pub async fn advance(&mut self) -> Result<(), NodeError> {
+        self.consensus
+            .advance()
             .await
-            .map_err(NodeError::ConsensusPayloadError)?;
-
-        let finalized_header = new_consensus.get_finalized_header();
-        let finalized_payload = new_consensus
-            .get_execution_payload(&Some(finalized_header.slot))
-            .await
-            .map_err(NodeError::ConsensusPayloadError)?;
-
-        let start_slot = self
-            .current_slot
-            .unwrap_or(latest_header.slot - self.history_size as u64);
-        let backfill_payloads = new_consensus
-            .get_payloads(start_slot, latest_header.slot)
-            .await
-            .map_err(NodeError::ConsensusPayloadError)?;
-
-        Ok(PayloadsUpdate {
-            latest_payload,
-            finalized_payload,
-            backfill_payloads,
-        })
-    }
-
-    pub async fn advance(
-        &mut self,
-        new_consensus: ConsensusClient<NimbusRpc>,
-        payloads_update: PayloadsUpdate,
-    ) -> Result<(), NodeError> {
-        self.consensus = new_consensus;
-        self.update_payloads(payloads_update).await
+            .map_err(NodeError::ConsensusAdvanceError)?;
+        self.update_payloads().await
     }
 
     pub fn duration_until_next_update(&self) -> Duration {
@@ -139,12 +94,20 @@ impl Node {
             .unwrap()
     }
 
-    async fn update_payloads(&mut self, payloads_update: PayloadsUpdate) -> Result<(), NodeError> {
-        let PayloadsUpdate {
-            latest_payload,
-            finalized_payload,
-            backfill_payloads,
-        } = payloads_update;
+    async fn update_payloads(&mut self) -> Result<(), NodeError> {
+        let latest_header = self.consensus.get_header();
+        let latest_payload = self
+            .consensus
+            .get_execution_payload(&Some(latest_header.slot))
+            .await
+            .map_err(NodeError::ConsensusPayloadError)?;
+
+        let finalized_header = self.consensus.get_finalized_header();
+        let finalized_payload = self
+            .consensus
+            .get_execution_payload(&Some(finalized_header.slot))
+            .await
+            .map_err(NodeError::ConsensusPayloadError)?;
 
         self.payloads
             .insert(*latest_payload.block_number(), latest_payload);
@@ -153,11 +116,19 @@ impl Node {
         self.finalized_payloads
             .insert(*finalized_payload.block_number(), finalized_payload);
 
+        let start_slot = self
+            .current_slot
+            .unwrap_or(latest_header.slot - self.history_size as u64);
+        let backfill_payloads = self
+            .consensus
+            .get_payloads(start_slot, latest_header.slot)
+            .await
+            .map_err(NodeError::ConsensusPayloadError)?;
         for payload in backfill_payloads {
             self.payloads.insert(*payload.block_number(), payload);
         }
 
-        self.current_slot = Some(self.consensus.get_header().slot);
+        self.current_slot = Some(latest_header.slot);
 
         while self.payloads.len() > self.history_size {
             self.payloads.pop_first();

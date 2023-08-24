@@ -1,7 +1,6 @@
-#[cfg(not(target_arch = "wasm32"))]
-use std::net::IpAddr;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex};
 
+use arc_swap::ArcSwap;
 use config::networks::Network;
 use consensus::errors::ConsensusError;
 use ethers_core::types::{
@@ -13,9 +12,10 @@ use common::types::BlockTag;
 use config::{CheckpointFallback, Config};
 use consensus::{types::Header, ConsensusClient};
 use execution::types::{CallOpts, ExecutionBlock};
-use log::{error, info, warn};
-use tokio::sync::RwLock;
+use log::{debug, error, info, warn};
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::net::IpAddr;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
@@ -29,6 +29,10 @@ use tokio::time::sleep;
 use ic_cdk::spawn;
 #[cfg(target_arch = "wasm32")]
 use ic_cdk_timers::{clear_timer, set_timer_interval, TimerId};
+#[cfg(target_arch = "wasm32")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_arch = "wasm32")]
+use std::time::Duration;
 
 use crate::database::Database;
 use crate::errors::NodeError;
@@ -232,16 +236,16 @@ impl ClientBuilder {
 }
 
 pub struct Client<DB: Database> {
-    node: Arc<RwLock<Node>>,
+    node: Arc<ArcSwap<Node>>,
     #[cfg(not(target_arch = "wasm32"))]
     rpc: Option<Rpc>,
     db: DB,
     fallback: Option<String>,
     load_external_fallback: bool,
     #[cfg(not(target_arch = "wasm32"))]
-    abort_handle: StdMutex<Option<AbortHandle>>,
+    abort_handle: Mutex<Option<AbortHandle>>,
     #[cfg(target_arch = "wasm32")]
-    timer_id: StdMutex<Option<TimerId>>,
+    timer_id: Mutex<Option<TimerId>>,
 }
 
 impl<DB: Database> Client<DB> {
@@ -254,7 +258,7 @@ impl<DB: Database> Client<DB> {
 
         let config = Arc::new(config);
         let node = Node::new(config.clone())?;
-        let node = Arc::new(RwLock::new(node));
+        let node = Arc::new(ArcSwap::new(Arc::new(node)));
 
         #[cfg(not(target_arch = "wasm32"))]
         let mut rpc: Option<Rpc> = None;
@@ -272,9 +276,9 @@ impl<DB: Database> Client<DB> {
             fallback: config.fallback.clone(),
             load_external_fallback: config.load_external_fallback,
             #[cfg(not(target_arch = "wasm32"))]
-            abort_handle: StdMutex::new(None),
+            abort_handle: Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
-            timer_id: StdMutex::new(None),
+            timer_id: Mutex::new(None),
         })
     }
 
@@ -284,7 +288,9 @@ impl<DB: Database> Client<DB> {
             rpc.start().await?;
         }
 
-        let sync_res = self.node.write().await.sync().await;
+        let mut node = Node::clone(&*self.node.load());
+
+        let sync_res = node.sync().await;
 
         if let Err(err) = sync_res {
             match err {
@@ -292,20 +298,12 @@ impl<DB: Database> Client<DB> {
                     Some(ConsensusError::CheckpointTooOld) => {
                         warn!(
                             "failed to sync consensus node with checkpoint: 0x{}",
-                            hex::encode(
-                                self.node
-                                    .read()
-                                    .await
-                                    .config
-                                    .checkpoint
-                                    .clone()
-                                    .unwrap_or_default()
-                            ),
+                            hex::encode(node.config.checkpoint.clone().unwrap_or_default()),
                         );
 
-                        let fallback = self.boot_from_fallback().await;
+                        let fallback = self.boot_from_fallback(&mut node).await;
                         if fallback.is_err() && self.load_external_fallback {
-                            self.boot_from_external_fallbacks().await?
+                            self.boot_from_external_fallbacks(&mut node).await?
                         } else if fallback.is_err() {
                             error!("Invalid checkpoint. Please update your checkpoint too a more recent block. Alternatively, set an explicit checkpoint fallback service url with the `-f` flag or use the configured external fallback services with `-l` (NOT RECOMMENDED). See https://github.com/a16z/helios#additional-options for more information.");
                             return Err(err);
@@ -317,8 +315,8 @@ impl<DB: Database> Client<DB> {
             }
         }
 
-        self.save_last_checkpoint().await;
-
+        self.node.store(Arc::new(node));
+        self.save_last_checkpoint();
         self.start_advance_thread();
 
         Ok(())
@@ -326,30 +324,22 @@ impl<DB: Database> Client<DB> {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn start_advance_thread(&self) {
-        let node = self.node.clone();
+        let arc_swap_node = self.node.clone();
 
         let handle = spawn(async move {
             loop {
-                let new_consensus = match node.read().await.advance_consensus().await {
-                    Ok(consensus) => consensus,
-                    Err(err) => {
-                        warn!("advancing consensus error: {err}");
-                        return;
-                    }
-                };
-                let payloads = match node.read().await.get_payloads_update(&new_consensus).await {
-                    Ok(payloads) => payloads,
-                    Err(err) => {
-                        warn!("getting payloads update error: {err}");
-                        return;
-                    }
-                };
-                let res = node.write().await.advance(new_consensus, payloads).await;
-                if let Err(err) = res {
-                    warn!("advancing node error: {err}");
+                debug!("Advancing the client");
+
+                let mut node = Node::clone(&*arc_swap_node.load());
+
+                if let Err(e) = node.advance().await {
+                    warn!("advancing node error: {e}");
                 }
 
-                let next_update = node.read().await.duration_until_next_update();
+                let next_update = node.duration_until_next_update();
+                arc_swap_node.store(Arc::new(node));
+
+                debug!("Advancing finished");
 
                 sleep(next_update).await;
             }
@@ -360,55 +350,48 @@ impl<DB: Database> Client<DB> {
 
     #[cfg(target_arch = "wasm32")]
     fn start_advance_thread(&self) {
-        use std::time::Duration;
-        use tokio::sync::Mutex;
-
-        let node = self.node.clone();
-        let update_guard = Arc::new(Mutex::new(()));
+        let arc_swap_node = self.node.clone();
+        let updating = Arc::new(AtomicBool::new(false));
 
         let timer_id = set_timer_interval(Duration::from_secs(12), move || {
-            let node = node.clone();
-            let update_guard = update_guard.clone();
+            let arc_swap_node = arc_swap_node.clone();
+            let updating = updating.clone();
 
             spawn(async move {
-                let _guard = match update_guard.try_lock() {
-                    Ok(guard) => guard,
-                    _ => {
-                        log::debug!("Advancing already in progress");
-                        return;
-                    }
-                };
-
-                info!("Advancing the client");
-
-                let new_consensus = match node.read().await.advance_consensus().await {
-                    Ok(consensus) => consensus,
-                    Err(err) => {
-                        warn!("advancing consensus error: {err}");
-                        return;
-                    }
-                };
-
-                let payloads = match node.read().await.get_payloads_update(&new_consensus).await {
-                    Ok(payloads) => payloads,
-                    Err(err) => {
-                        warn!("getting payloads update error: {err}");
-                        return;
-                    }
-                };
-
-                if let Err(err) = node.write().await.advance(new_consensus, payloads).await {
-                    warn!("advancing node error: {err}");
+                // Guarding must be done within the same task that ungaurding is done.
+                //
+                // This is because if ICP execution fails, the mutations of the task will be
+                // reverted, including the guarding.
+                //
+                // If guarding was done before the newly spawned task, then on failure guarding
+                // will never be reverted.
+                if updating
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_err()
+                {
+                    debug!("Advancing already in progress");
+                    return;
                 }
 
-                info!("Advancing finished");
+                debug!("Advancing the client");
+
+                let mut node = Node::clone(&*arc_swap_node.load());
+
+                if let Err(e) = node.advance().await {
+                    warn!("advancing node error: {e}");
+                }
+
+                arc_swap_node.store(Arc::new(node));
+                updating.store(false, Ordering::SeqCst);
+
+                debug!("Advancing finished");
             });
         });
 
         *self.timer_id.lock().unwrap() = Some(timer_id);
     }
 
-    async fn boot_from_fallback(&self) -> eyre::Result<()> {
+    async fn boot_from_fallback(&self, node: &mut Node) -> eyre::Result<()> {
         if let Some(fallback) = &self.fallback {
             info!(
                 "attempting to load checkpoint from fallback \"{}\"",
@@ -428,11 +411,11 @@ impl<DB: Database> Client<DB> {
 
             // Try to sync again with the new checkpoint by reconstructing the consensus client
             // We fail fast here since the node is unrecoverable at this point
-            let config = self.node.read().await.config.clone();
+            let config = node.config.clone();
             let consensus =
                 ConsensusClient::new(&config.consensus_rpc, checkpoint.as_bytes(), config.clone())?;
-            self.node.write().await.consensus = consensus;
-            self.node.write().await.sync().await?;
+            node.consensus = consensus;
+            node.sync().await?;
 
             Ok(())
         } else {
@@ -440,7 +423,7 @@ impl<DB: Database> Client<DB> {
         }
     }
 
-    async fn boot_from_external_fallbacks(&self) -> eyre::Result<()> {
+    async fn boot_from_external_fallbacks(&self, node: &mut Node) -> eyre::Result<()> {
         info!("attempting to fetch checkpoint from external fallbacks...");
         // Build the list of external checkpoint fallback services
         let list = CheckpointFallback::new()
@@ -448,7 +431,7 @@ impl<DB: Database> Client<DB> {
             .await
             .map_err(|_| eyre::eyre!("Failed to construct external checkpoint sync fallbacks"))?;
 
-        let checkpoint = if self.node.read().await.config.chain.chain_id == 5 {
+        let checkpoint = if node.config.chain.chain_id == 5 {
             list.fetch_latest_checkpoint(&Network::GOERLI)
                 .await
                 .map_err(|_| {
@@ -469,19 +452,18 @@ impl<DB: Database> Client<DB> {
 
         // Try to sync again with the new checkpoint by reconstructing the consensus client
         // We fail fast here since the node is unrecoverable at this point
-        let config = self.node.read().await.config.clone();
+        let config = node.config.clone();
         let consensus =
             ConsensusClient::new(&config.consensus_rpc, checkpoint.as_bytes(), config.clone())?;
-        self.node.write().await.consensus = consensus;
-        self.node.write().await.sync().await?;
+        node.consensus = consensus;
+        node.sync().await?;
+
         Ok(())
     }
 
     /// Saves last checkpoint of the node.
-    async fn save_last_checkpoint(&self) {
-        let node = self.node.read().await;
-
-        if let Some(checkpoint) = node.get_last_checkpoint() {
+    fn save_last_checkpoint(&self) {
+        if let Some(checkpoint) = self.node.load().get_last_checkpoint() {
             info!("saving last checkpoint hash");
             let res = self.db.save_checkpoint(checkpoint);
             if res.is_err() {
@@ -490,10 +472,9 @@ impl<DB: Database> Client<DB> {
         };
     }
 
-    pub async fn get_last_checkpoint(&self) -> Option<String> {
+    pub fn get_last_checkpoint(&self) -> Option<String> {
         self.node
-            .read()
-            .await
+            .load()
             .get_last_checkpoint()
             .map(|checkpoint| format!("0x{}", hex::encode(checkpoint)))
     }
@@ -517,13 +498,12 @@ impl<DB: Database> Client<DB> {
             }
         }
 
-        self.save_last_checkpoint().await;
+        self.save_last_checkpoint();
     }
 
     pub async fn call(&self, opts: &CallOpts, block: BlockTag) -> Result<Vec<u8>> {
         self.node
-            .read()
-            .await
+            .load_full()
             .call(opts, block)
             .await
             .map_err(|err| err.into())
@@ -531,37 +511,32 @@ impl<DB: Database> Client<DB> {
 
     pub async fn estimate_gas(&self, opts: &CallOpts) -> Result<u64> {
         self.node
-            .read()
-            .await
+            .load_full()
             .estimate_gas(opts)
             .await
             .map_err(|err| err.into())
     }
 
     pub async fn get_balance(&self, address: &Address, block: BlockTag) -> Result<U256> {
-        self.node.read().await.get_balance(address, block).await
+        self.node.load_full().get_balance(address, block).await
     }
 
     pub async fn get_nonce(&self, address: &Address, block: BlockTag) -> Result<u64> {
-        self.node.read().await.get_nonce(address, block).await
+        self.node.load_full().get_nonce(address, block).await
     }
 
-    pub async fn get_block_transaction_count_by_hash(&self, hash: &Vec<u8>) -> Result<u64> {
-        self.node
-            .read()
-            .await
-            .get_block_transaction_count_by_hash(hash)
+    pub fn get_block_transaction_count_by_hash(&self, hash: &Vec<u8>) -> Result<u64> {
+        self.node.load().get_block_transaction_count_by_hash(hash)
     }
 
-    pub async fn get_block_transaction_count_by_number(&self, block: BlockTag) -> Result<u64> {
+    pub fn get_block_transaction_count_by_number(&self, block: BlockTag) -> Result<u64> {
         self.node
-            .read()
-            .await
+            .load()
             .get_block_transaction_count_by_number(block)
     }
 
     pub async fn get_code(&self, address: &Address, block: BlockTag) -> Result<Vec<u8>> {
-        self.node.read().await.get_code(address, block).await
+        self.node.load_full().get_code(address, block).await
     }
 
     pub async fn get_storage_at(
@@ -571,50 +546,40 @@ impl<DB: Database> Client<DB> {
         block: BlockTag,
     ) -> Result<U256> {
         self.node
-            .read()
-            .await
+            .load_full()
             .get_storage_at(address, slot, block)
             .await
     }
 
     pub async fn send_raw_transaction(&self, bytes: &[u8]) -> Result<H256> {
-        self.node.read().await.send_raw_transaction(bytes).await
+        self.node.load_full().send_raw_transaction(bytes).await
     }
 
     pub async fn get_transaction_receipt(
         &self,
         tx_hash: &H256,
     ) -> Result<Option<TransactionReceipt>> {
-        self.node
-            .read()
-            .await
-            .get_transaction_receipt(tx_hash)
-            .await
+        self.node.load_full().get_transaction_receipt(tx_hash).await
     }
 
     pub async fn get_transaction_by_hash(&self, tx_hash: &H256) -> Result<Option<Transaction>> {
-        self.node
-            .read()
-            .await
-            .get_transaction_by_hash(tx_hash)
-            .await
+        self.node.load_full().get_transaction_by_hash(tx_hash).await
     }
 
     pub async fn get_logs(&self, filter: &Filter) -> Result<Vec<Log>> {
-        self.node.read().await.get_logs(filter).await
+        self.node.load_full().get_logs(filter).await
     }
 
-    pub async fn get_gas_price(&self) -> Result<U256> {
-        self.node.read().await.get_gas_price()
+    pub fn get_gas_price(&self) -> Result<U256> {
+        self.node.load_full().get_gas_price()
     }
 
-    pub async fn get_priority_fee(&self) -> Result<U256> {
-        self.node.read().await.get_priority_fee()
+    pub fn get_priority_fee(&self) -> Result<U256> {
+        self.node.load_full().get_priority_fee()
     }
 
-    pub async fn get_block_number(&self) -> Result<u64> {
-        info!("Getting block number");
-        self.node.read().await.get_block_number()
+    pub fn get_block_number(&self) -> Result<u64> {
+        self.node.load().get_block_number()
     }
 
     pub async fn get_fee_history(
@@ -624,8 +589,7 @@ impl<DB: Database> Client<DB> {
         reward_percentiles: &[f64],
     ) -> Result<Option<FeeHistory>> {
         self.node
-            .read()
-            .await
+            .load_full()
             .get_fee_history(block_count, last_block, reward_percentiles)
             .await
     }
@@ -636,8 +600,7 @@ impl<DB: Database> Client<DB> {
         full_tx: bool,
     ) -> Result<Option<ExecutionBlock>> {
         self.node
-            .read()
-            .await
+            .load_full()
             .get_block_by_number(block, full_tx)
             .await
     }
@@ -647,11 +610,7 @@ impl<DB: Database> Client<DB> {
         hash: &Vec<u8>,
         full_tx: bool,
     ) -> Result<Option<ExecutionBlock>> {
-        self.node
-            .read()
-            .await
-            .get_block_by_hash(hash, full_tx)
-            .await
+        self.node.load_full().get_block_by_hash(hash, full_tx).await
     }
 
     pub async fn get_transaction_by_block_hash_and_index(
@@ -660,25 +619,24 @@ impl<DB: Database> Client<DB> {
         index: usize,
     ) -> Result<Option<Transaction>> {
         self.node
-            .read()
-            .await
+            .load_full()
             .get_transaction_by_block_hash_and_index(block_hash, index)
             .await
     }
 
-    pub async fn chain_id(&self) -> u64 {
-        self.node.read().await.chain_id()
+    pub fn chain_id(&self) -> u64 {
+        self.node.load().chain_id()
     }
 
-    pub async fn syncing(&self) -> Result<SyncingStatus> {
-        self.node.read().await.syncing()
+    pub fn syncing(&self) -> Result<SyncingStatus> {
+        self.node.load().syncing()
     }
 
-    pub async fn get_header(&self) -> Result<Header> {
-        self.node.read().await.get_header()
+    pub fn get_header(&self) -> Result<Header> {
+        self.node.load().get_header()
     }
 
-    pub async fn get_coinbase(&self) -> Result<Address> {
-        self.node.read().await.get_coinbase()
+    pub fn get_coinbase(&self) -> Result<Address> {
+        self.node.load().get_coinbase()
     }
 }
