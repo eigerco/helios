@@ -364,7 +364,7 @@ impl<DB: Database> Client<DB> {
             }
 
             spawn(async move {
-                // This should not be set before the `spawn` because we want to make sure
+                // This should be set within `spawn` because we want to make sure
                 // that if there is an ICP failure, the flag will be reverted by ICP.
                 in_progress.set(true);
                 debug!("Advancing the client");
