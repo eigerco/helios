@@ -30,10 +30,6 @@ use ic_cdk::spawn;
 #[cfg(target_arch = "wasm32")]
 use ic_cdk_timers::{clear_timer, set_timer_interval, TimerId};
 #[cfg(target_arch = "wasm32")]
-use std::cell::Cell;
-#[cfg(target_arch = "wasm32")]
-use std::rc::Rc;
-#[cfg(target_arch = "wasm32")]
 use std::time::Duration;
 
 use crate::database::Database;
@@ -352,21 +348,19 @@ impl<DB: Database> Client<DB> {
     #[cfg(target_arch = "wasm32")]
     fn start_advance_thread(&self) {
         let arc_swap_node = self.node.clone();
-        let in_progress = Rc::new(Cell::new(false));
+        let in_progress_guard = Arc::new(Mutex::new(()));
 
         let timer_id = set_timer_interval(Duration::from_secs(12), move || {
             let arc_swap_node = arc_swap_node.clone();
-            let in_progress = in_progress.clone();
-
-            if in_progress.get() {
-                debug!("Advancing already in progress");
-                return;
-            }
+            let in_progress_guard = in_progress_guard.clone();
 
             spawn(async move {
-                // This should be set within `spawn` because we want to make sure
-                // that if there is an ICP failure, the flag will be reverted by ICP.
-                in_progress.set(true);
+                // This is std mutex in async context, so it should be used only with try_lock!
+                let Ok(_guard) = in_progress_guard.try_lock() else {
+                    debug!("Advancing already in progress");
+                    return;
+                };
+
                 debug!("Advancing the client");
 
                 let mut node = Node::clone(&*arc_swap_node.load());
@@ -377,7 +371,6 @@ impl<DB: Database> Client<DB> {
                 }
 
                 debug!("Advancing finished");
-                in_progress.set(false);
             });
         });
 
