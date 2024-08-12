@@ -1,3 +1,8 @@
+This fork of Helios is utilized by our [ethereum-canister](https://github.com/eigerco/ethereum-canister) project.
+Read more about the changes [here](https://github.com/eigerco/ethereum-canister?tab=readme-ov-file#helios).
+
+***
+
 ## Helios
 
 [![build](https://github.com/a16z/helios/actions/workflows/test.yml/badge.svg)](https://github.com/a16z/helios/actions/workflows/test.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT) [![chat](https://img.shields.io/badge/chat-telegram-blue)](https://t.me/+IntDY_gZJSRkNTJj)
